@@ -1,0 +1,35 @@
+node_modules/
+dist/
+.next/
+.turbo/
+out/
+build/
+
+.env
+.env.local
+.env.*.local
+!.env.example
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+coverage/
+.nyc_output/
+
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.tsbuildinfo
+.claude/
+
+# generated
+apps/products/prisma/generated/
+
+# docker volumes
+docker/localstack/volume/
+docker/psql/
+volume/
+psql/

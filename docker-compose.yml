@@ -1,0 +1,142 @@
+services:
+  psql:
+    image: postgres:16
+    container_name: universe-psql
+    environment:
+      POSTGRES_DB: legaltech_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5434:5432"
+    volumes:
+      - psql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d legaltech_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - universe
+
+  localstack:
+    image: localstack/localstack:4
+    container_name: universe-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DEBUG: 0
+    volumes:
+      - ./docker/localstack/init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh:ro
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs list-queues | grep -q product-events"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - universe
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: universe-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - universe
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: universe-grafana
+    ports:
+      - "3010:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - universe
+
+  products:
+    build:
+      context: .
+      dockerfile: apps/products/Dockerfile
+    container_name: universe-products
+    depends_on:
+      psql:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://postgres:root@psql:5432/legaltech_test
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_ENDPOINT: http://localstack:4566
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/product-events
+      LOG_LEVEL: info
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+    networks:
+      - universe
+
+  notifications:
+    build:
+      context: .
+      dockerfile: apps/notifications/Dockerfile
+    container_name: universe-notifications
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      PORT: 3002
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_ENDPOINT: http://localstack:4566
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/product-events
+      LOG_LEVEL: info
+      NODE_ENV: production
+    ports:
+      - "3002:3002"
+    networks:
+      - universe
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: universe-web
+    depends_on:
+      - products
+    environment:
+      PRODUCTS_API_URL: http://products:3001
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    networks:
+      - universe
+
+volumes:
+  psql-data:
+  localstack-data:
+  grafana-data:
+
+networks:
+  universe:
+    driver: bridge

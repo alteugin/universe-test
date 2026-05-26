@@ -1,0 +1,36 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(255)
+  description String   @db.Text
+  price       Float
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("products")
+}
+
+// Transactional outbox: rows are written in the same DB transaction as the
+// product mutation; an OutboxPoller drains them to SQS asynchronously.
+// `id` doubles as the event's `eventId`, `createdAt` doubles as `occurredAt`.
+model OutboxEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  eventType    String    @map("event_type")
+  payload      Json
+  createdAt    DateTime  @default(now()) @map("created_at")
+  dispatchedAt DateTime? @map("dispatched_at")
+  attempts     Int       @default(0)
+  lastError    String?   @map("last_error")
+
+  @@index([dispatchedAt, createdAt])
+  @@map("outbox_events")
+}
