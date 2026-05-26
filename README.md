@@ -20,7 +20,7 @@ flowchart TB
 
     Browser -->|"/api/products"| Web
     Web -->|HTTP| Products
-    Products -->|"atomic tx<br/>product + outbox row"| DB
+    Products -->|"atomic transaction:<br/>insert product +<br/>insert outbox event"| DB
     Poller -.->|"SELECT WHERE<br/>dispatched_at IS NULL"| DB
     Poller -->|dispatch| Queue
     Queue -->|consume| Notifications
