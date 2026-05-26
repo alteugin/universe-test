@@ -4,40 +4,39 @@ Two NestJS microservices behind a Next.js dashboard, communicating via AWS SQS (
 
 ## Architecture
 
-```
-┌──────────┐    HTTP     ┌──────────────┐    HTTP    ┌──────────────┐
-│ Browser  │ ───────────►│  Next.js 15  │ ──────────►│   Products   │
-│          │             │  (App + BFF) │            │   (NestJS)   │
-└──────────┘             └──────────────┘            └──────┬───────┘
-                                                            │ atomic transaction
-                                                            ▼
-                                                    ┌───────────────────┐
-                                                    │     Postgres      │
-                                                    │  products +       │
-                                                    │  outbox_events    │
-                                                    └─────────┬─────────┘
-                                                              │ OutboxPoller polls
-                                                              │ undispatched rows
-                                                              ▼ every 200ms
-                                                    ┌───────────────┐    ReceiveMessage    ┌──────────────────┐
-                                                    │ product-events│ ◄───────────────────│  Notifications   │
-                                                    │     (SQS)     │                      │     (NestJS)     │
-                                                    └───────┬───────┘                      └────────┬─────────┘
-                                                            │ redrive after 3 retries               │
-                                                            ▼                                       ▼ structured log
-                                                    ┌────────────────────┐                  ┌──────────────────┐
-                                                    │ product-events-dlq │                  │   Pino (stdout)  │
-                                                    └────────────────────┘                  └──────────────────┘
+```mermaid
+flowchart TB
+    Browser([Browser])
+    Web["Next.js 15<br/>App Router + BFF"]
+    Products["Products<br/>(NestJS)"]
+    DB[("Postgres<br/>products + outbox_events")]
+    Poller["OutboxPoller<br/>every 200ms"]
+    Queue[("SQS<br/>product-events")]
+    DLQ[("SQS DLQ<br/>product-events-dlq")]
+    Notifications["Notifications<br/>(NestJS)"]
+    Logs[/"Pino stdout<br/>structured JSON"/]
+    Prom["Prometheus"]
+    Graf["Grafana dashboard"]
 
-                                                                ┌────────────┐  scrape /metrics
-                                                                │ Prometheus │
-                                                                └─────┬──────┘
-                                                                      │  PromQL
-                                                                      ▼
-                                                                ┌────────────┐
-                                                                │  Grafana   │
-                                                                │ dashboard  │
-                                                                └────────────┘
+    Browser -->|"/api/products"| Web
+    Web -->|HTTP| Products
+    Products -->|"atomic tx<br/>product + outbox row"| DB
+    Poller -.->|"SELECT WHERE<br/>dispatched_at IS NULL"| DB
+    Poller -->|dispatch| Queue
+    Queue -->|consume| Notifications
+    Queue -.->|"3 failed receives"| DLQ
+    Notifications --> Logs
+
+    Prom -.->|scrape /metrics| Products
+    Prom -.->|scrape /metrics| Notifications
+    Graf -->|PromQL| Prom
+
+    Products -.- Poller
+
+    classDef storage fill:#e8f0ff,stroke:#2563eb;
+    classDef observability fill:#fef3c7,stroke:#d97706;
+    class DB,Queue,DLQ storage
+    class Prom,Graf observability
 ```
 
 ## Stack
